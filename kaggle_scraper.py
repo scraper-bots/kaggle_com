@@ -4,12 +4,18 @@ import asyncio
 import aiohttp
 import csv
 import json
+import os
 import ssl
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Optional
 
 API_URL = "https://www.kaggle.com/api/i/datasets.DatasetService/SearchDatasets"
 KAGGLE_DATASETS_URL = "https://www.kaggle.com/datasets"
+
+# Progress file to track state
+PROGRESS_FILE = "kaggle_scraper_progress.json"
+OUTPUT_FILE = "kaggle_datasets.csv"
 
 HEADERS = {
     "Accept": "application/json",
@@ -37,83 +43,34 @@ BASE_PAYLOAD = {
     "viewed": "DATASET_VIEWED_GROUP_UNSPECIFIED",
 }
 
+SORT_OPTIONS = [
+    "DATASET_SORT_BY_HOTTEST",
+    "DATASET_SORT_BY_VOTES",
+    "DATASET_SORT_BY_UPDATED",
+    "DATASET_SORT_BY_ACTIVE",
+    "DATASET_SORT_BY_PUBLISHED",
+    "DATASET_SORT_BY_USABILITY",
+]
+
 # CSV column headers - all fields from the API response
 CSV_COLUMNS = [
-    # Basic info
-    "dataset_id",
-    "dataset_url",
-    "dataset_slug",
-    "rank",
-    "medal_url",
-    "has_hash_link",
-    "firestore_path",
-
-    # Owner info
-    "owner_name",
-    "owner_url",
-    "owner_user_id",
-    "owner_tier",
-    "owner_avatar_url",
-
-    # Creator info
-    "creator_name",
-    "creator_url",
-    "creator_user_id",
-
-    # Stats
-    "view_count",
-    "download_count",
-    "script_count",
-    "total_votes",
-
-    # URLs
-    "scripts_url",
-    "forum_url",
-    "download_url",
-    "new_kernel_notebook_url",
-    "new_kernel_script_url",
-
-    # Dates
-    "date_created",
-    "date_updated",
-
-    # License
-    "license_name",
-    "license_short_name",
-
-    # Size info
-    "dataset_size",
-
-    # File types (JSON string)
-    "common_file_types",
-
-    # Categories (JSON string)
-    "categories",
-    "category_names",
-
-    # Usability rating
-    "usability_score",
-    "usability_column_description_score",
-    "usability_cover_image_score",
-    "usability_file_description_score",
-    "usability_file_format_score",
-    "usability_license_score",
-    "usability_overview_score",
-    "usability_provenance_score",
-    "usability_public_kernel_score",
-    "usability_subtitle_score",
-    "usability_tag_score",
-    "usability_update_frequency_score",
-
-    # Datasource info
-    "datasource_dataset_id",
-    "datasource_current_version_id",
-    "datasource_current_version_number",
-    "datasource_type",
-    "datasource_diff_type",
-    "datasource_title",
-    "datasource_overview",
-    "datasource_thumbnail_url",
+    "dataset_id", "dataset_url", "dataset_slug", "rank", "medal_url",
+    "has_hash_link", "firestore_path", "owner_name", "owner_url",
+    "owner_user_id", "owner_tier", "owner_avatar_url", "creator_name",
+    "creator_url", "creator_user_id", "view_count", "download_count",
+    "script_count", "total_votes", "scripts_url", "forum_url", "download_url",
+    "new_kernel_notebook_url", "new_kernel_script_url", "date_created",
+    "date_updated", "license_name", "license_short_name", "dataset_size",
+    "common_file_types", "categories", "category_names", "usability_score",
+    "usability_column_description_score", "usability_cover_image_score",
+    "usability_file_description_score", "usability_file_format_score",
+    "usability_license_score", "usability_overview_score",
+    "usability_provenance_score", "usability_public_kernel_score",
+    "usability_subtitle_score", "usability_tag_score",
+    "usability_update_frequency_score", "datasource_dataset_id",
+    "datasource_current_version_id", "datasource_current_version_number",
+    "datasource_type", "datasource_diff_type", "datasource_title",
+    "datasource_overview", "datasource_thumbnail_url",
 ]
 
 
@@ -123,12 +80,9 @@ def extract_dataset_info(item: dict[str, Any]) -> dict[str, Any]:
     usability = item.get("usabilityRating", {})
     datasource = item.get("datasource", {})
     categories = item.get("categories", [])
-
-    # Extract category names as comma-separated string
     category_names = ", ".join([cat.get("name", "") for cat in categories])
 
     return {
-        # Basic info
         "dataset_id": vote_button.get("datasetId", ""),
         "dataset_url": item.get("datasetUrl", ""),
         "dataset_slug": item.get("datasetSlug", ""),
@@ -136,51 +90,31 @@ def extract_dataset_info(item: dict[str, Any]) -> dict[str, Any]:
         "medal_url": item.get("medalUrl", ""),
         "has_hash_link": item.get("hasHashLink", False),
         "firestore_path": item.get("firestorePath", ""),
-
-        # Owner info
         "owner_name": item.get("ownerName", ""),
         "owner_url": item.get("ownerUrl", ""),
         "owner_user_id": item.get("ownerUserId", ""),
         "owner_tier": item.get("ownerTier", ""),
         "owner_avatar_url": item.get("ownerAvatarUrl", ""),
-
-        # Creator info
         "creator_name": item.get("creatorName", ""),
         "creator_url": item.get("creatorUrl", ""),
         "creator_user_id": item.get("creatorUserId", ""),
-
-        # Stats
         "view_count": item.get("viewCount", 0),
         "download_count": item.get("downloadCount", 0),
         "script_count": item.get("scriptCount", 0),
         "total_votes": vote_button.get("totalVotes", 0),
-
-        # URLs
         "scripts_url": item.get("scriptsUrl", ""),
         "forum_url": item.get("forumUrl", ""),
         "download_url": item.get("downloadUrl", ""),
         "new_kernel_notebook_url": item.get("newKernelNotebookUrl", ""),
         "new_kernel_script_url": item.get("newKernelScriptUrl", ""),
-
-        # Dates
         "date_created": item.get("dateCreated", ""),
         "date_updated": item.get("dateUpdated", ""),
-
-        # License
         "license_name": item.get("licenseName", ""),
         "license_short_name": item.get("licenseShortName", ""),
-
-        # Size info
         "dataset_size": item.get("datasetSize", 0),
-
-        # File types (as JSON string)
         "common_file_types": json.dumps(item.get("commonFileTypes", [])),
-
-        # Categories (as JSON string and names)
         "categories": json.dumps(categories),
         "category_names": category_names,
-
-        # Usability rating
         "usability_score": usability.get("score", 0),
         "usability_column_description_score": usability.get("columnDescriptionScore", 0),
         "usability_cover_image_score": usability.get("coverImageScore", 0),
@@ -193,8 +127,6 @@ def extract_dataset_info(item: dict[str, Any]) -> dict[str, Any]:
         "usability_subtitle_score": usability.get("subtitleScore", 0),
         "usability_tag_score": usability.get("tagScore", 0),
         "usability_update_frequency_score": usability.get("updateFrequencyScore", 0),
-
-        # Datasource info
         "datasource_dataset_id": datasource.get("datasetId", ""),
         "datasource_current_version_id": datasource.get("currentDatasetVersionId", ""),
         "datasource_current_version_number": datasource.get("currentDatasetVersionNumber", ""),
@@ -206,204 +138,335 @@ def extract_dataset_info(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def load_progress() -> dict:
+    """Load progress from file."""
+    if Path(PROGRESS_FILE).exists():
+        try:
+            with open(PROGRESS_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"Error loading progress: {e}")
+    return {"completed_sorts": [], "seen_ids": [], "total_scraped": 0}
+
+
+def save_progress(progress: dict) -> None:
+    """Save progress to file."""
+    try:
+        with open(PROGRESS_FILE, "w") as f:
+            json.dump(progress, f)
+    except Exception as e:
+        print(f"Error saving progress: {e}")
+
+
+def load_existing_csv() -> tuple[list[dict], set]:
+    """Load existing CSV data and return datasets and seen IDs."""
+    datasets = []
+    seen_ids = set()
+
+    if Path(OUTPUT_FILE).exists():
+        try:
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    datasets.append(row)
+                    ds_id = row.get("dataset_id")
+                    if ds_id:
+                        seen_ids.add(int(ds_id) if ds_id.isdigit() else ds_id)
+            print(f"Loaded {len(datasets)} existing datasets from {OUTPUT_FILE}")
+        except Exception as e:
+            print(f"Error loading existing CSV: {e}")
+
+    return datasets, seen_ids
+
+
+def append_to_csv(datasets: list[dict], filename: str = OUTPUT_FILE) -> None:
+    """Append datasets to CSV file."""
+    if not datasets:
+        return
+
+    file_exists = Path(filename).exists()
+
+    try:
+        with open(filename, "a", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+            if not file_exists:
+                writer.writeheader()
+            writer.writerows(datasets)
+    except Exception as e:
+        print(f"Error appending to CSV: {e}")
+        # Try backup file
+        backup = f"kaggle_datasets_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        try:
+            with open(backup, "w", newline="", encoding="utf-8") as f:
+                writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
+                writer.writeheader()
+                writer.writerows(datasets)
+            print(f"Saved backup to {backup}")
+        except Exception as e2:
+            print(f"Error saving backup: {e2}")
+
+
 async def init_session(session: aiohttp.ClientSession) -> str | None:
     """Initialize session by visiting the datasets page to get cookies and XSRF token."""
-    try:
-        async with session.get(KAGGLE_DATASETS_URL) as response:
-            if response.status == 200:
-                # Get XSRF token from cookies
-                cookies = session.cookie_jar.filter_cookies(KAGGLE_DATASETS_URL)
-                xsrf_token = None
-                for cookie in cookies.values():
-                    if cookie.key == "XSRF-TOKEN":
-                        xsrf_token = cookie.value
-                        break
-                print(f"Session initialized, XSRF token: {'found' if xsrf_token else 'not found'}")
-                return xsrf_token
-            else:
+    for attempt in range(3):
+        try:
+            async with session.get(KAGGLE_DATASETS_URL) as response:
+                if response.status == 200:
+                    cookies = session.cookie_jar.filter_cookies(KAGGLE_DATASETS_URL)
+                    for cookie in cookies.values():
+                        if cookie.key == "XSRF-TOKEN":
+                            print(f"Session initialized, XSRF token found")
+                            return cookie.value
                 print(f"Failed to initialize session: HTTP {response.status}")
-                return None
-    except Exception as e:
-        print(f"Error initializing session: {e}")
-        return None
+        except Exception as e:
+            print(f"Error initializing session (attempt {attempt + 1}): {e}")
+            await asyncio.sleep(2 ** attempt)
+    return None
 
 
-async def fetch_page(
+async def scrape_with_sort(
     session: aiohttp.ClientSession,
-    page: int,
     semaphore: asyncio.Semaphore,
-    xsrf_token: str | None = None,
-    retry_count: int = 3,
-) -> tuple[list[dict], bool, int]:
-    """Fetch a single page of datasets. Returns (datasets, has_more, total_results)."""
-    async with semaphore:
-        payload = {**BASE_PAYLOAD, "page": page}
-        headers = {**HEADERS}
+    xsrf_token: str | None,
+    sort_by: str,
+    seen_ids: set,
+    max_pages: int | None = None,
+    save_interval: int = 50,
+) -> list[dict]:
+    """Scrape datasets using a specific sort order with crash protection."""
+    all_new_datasets = []
+    batch_datasets = []
+    page = 1
+    consecutive_errors = 0
+    max_consecutive_errors = 10
 
+    print(f"\n{'='*50}")
+    print(f"Scraping with sort: {sort_by}")
+    print(f"{'='*50}")
+
+    while True:
+        if max_pages and page > max_pages:
+            break
+
+        if consecutive_errors >= max_consecutive_errors:
+            print(f"Too many consecutive errors, stopping {sort_by}")
+            break
+
+        payload = {**BASE_PAYLOAD, "page": page, "sortBy": sort_by}
+        headers = {**HEADERS}
         if xsrf_token:
             headers["X-XSRF-TOKEN"] = xsrf_token
 
-        for attempt in range(retry_count):
-            try:
+        try:
+            async with semaphore:
                 async with session.post(API_URL, json=payload, headers=headers) as response:
-                    if response.status == 429:  # Rate limited
-                        wait_time = 2 ** attempt * 5
-                        print(f"Page {page}: Rate limited, waiting {wait_time}s...")
+                    # Debug: print status for first few pages
+                    if page <= 5:
+                        print(f"  DEBUG Page {page}: status={response.status}")
+
+                    if response.status == 404:
+                        consecutive_errors += 1
+                        if consecutive_errors >= 3:
+                            print(f"Hit page limit at page {page} for {sort_by}")
+                            break
+                        page += 1
+                        continue
+
+                    if response.status == 429:
+                        wait_time = min(60, 2 ** consecutive_errors * 5)
+                        print(f"Rate limited, waiting {wait_time}s...")
                         await asyncio.sleep(wait_time)
+                        consecutive_errors += 1
                         continue
 
                     if response.status != 200:
-                        text = await response.text()
-                        print(f"Page {page}: HTTP {response.status} - {text[:100]}")
-                        if attempt < retry_count - 1:
-                            await asyncio.sleep(2 ** attempt)
-                            continue
-                        return [], False, 0
+                        print(f"Page {page}: HTTP {response.status}")
+                        consecutive_errors += 1
+                        page += 1
+                        await asyncio.sleep(1)
+                        continue
 
+                    consecutive_errors = 0
                     data = await response.json()
                     dataset_list = data.get("datasetList", {})
                     items = dataset_list.get("items", [])
                     has_more = data.get("hasMore", False)
-                    total_results = dataset_list.get("totalResults", 0)
 
-                    extracted = [extract_dataset_info(item) for item in items]
-                    print(f"Page {page}: fetched {len(extracted)} datasets")
+                    new_count = 0
+                    for item in items:
+                        try:
+                            extracted = extract_dataset_info(item)
+                            ds_id = extracted.get("dataset_id")
+                            if ds_id and ds_id not in seen_ids:
+                                seen_ids.add(ds_id)
+                                batch_datasets.append(extracted)
+                                all_new_datasets.append(extracted)
+                                new_count += 1
+                        except Exception as e:
+                            print(f"Error extracting item: {e}")
 
-                    return extracted, has_more, total_results
+                    print(f"Page {page}: {len(items)} items, {new_count} new (total unique: {len(seen_ids)})")
 
-            except asyncio.TimeoutError:
-                print(f"Page {page}: Timeout (attempt {attempt + 1}/{retry_count})")
-                await asyncio.sleep(2 ** attempt)
-            except Exception as e:
-                print(f"Page {page}: Error - {e} (attempt {attempt + 1}/{retry_count})")
-                await asyncio.sleep(2 ** attempt)
+                    # Save batch to CSV periodically
+                    if len(batch_datasets) >= save_interval:
+                        append_to_csv(batch_datasets)
+                        print(f"  -> Saved {len(batch_datasets)} datasets to CSV")
+                        batch_datasets = []
 
-        return [], False, 0
+                    if not has_more or len(items) == 0:
+                        print(f"No more data for {sort_by}")
+                        break
+
+                    page += 1
+                    await asyncio.sleep(0.1)
+
+        except asyncio.TimeoutError:
+            print(f"Page {page}: Timeout")
+            consecutive_errors += 1
+            await asyncio.sleep(2)
+        except asyncio.CancelledError:
+            # Save remaining data before exit
+            if batch_datasets:
+                append_to_csv(batch_datasets)
+                print(f"Cancelled - saved {len(batch_datasets)} datasets")
+            raise
+        except Exception as e:
+            print(f"Page {page}: Error - {e}")
+            consecutive_errors += 1
+            await asyncio.sleep(2)
+
+    # Save remaining batch
+    if batch_datasets:
+        append_to_csv(batch_datasets)
+        print(f"  -> Saved remaining {len(batch_datasets)} datasets to CSV")
+
+    return all_new_datasets
 
 
 async def scrape_all_datasets(
-    max_concurrent: int = 5,
+    max_concurrent: int = 10,
     max_pages: int | None = None,
-) -> list[dict]:
-    """Scrape all datasets with pagination."""
-    all_datasets = []
-    semaphore = asyncio.Semaphore(max_concurrent)
+) -> int:
+    """Scrape all datasets using multiple sort orders with crash protection."""
 
-    # Create SSL context that doesn't verify certificates
+    # Load previous progress
+    progress = load_progress()
+    completed_sorts = set(progress.get("completed_sorts", []))
+
+    # Load existing data
+    existing_datasets, seen_ids = load_existing_csv()
+    seen_ids.update(progress.get("seen_ids", []))
+
+    total_new = 0
+
+    print(f"\nResuming from progress:")
+    print(f"  Completed sorts: {len(completed_sorts)}")
+    print(f"  Existing datasets: {len(existing_datasets)}")
+    print(f"  Seen IDs: {len(seen_ids)}")
+
+    # Create SSL context
     ssl_context = ssl.create_default_context()
     ssl_context.check_hostname = False
     ssl_context.verify_mode = ssl.CERT_NONE
 
     connector = aiohttp.TCPConnector(limit=max_concurrent, ssl=ssl_context)
     timeout = aiohttp.ClientTimeout(total=60)
-
-    # Create cookie jar to persist cookies
     cookie_jar = aiohttp.CookieJar(unsafe=True)
+    semaphore = asyncio.Semaphore(max_concurrent)
 
-    async with aiohttp.ClientSession(
-        connector=connector,
-        timeout=timeout,
-        cookie_jar=cookie_jar
-    ) as session:
-        # Initialize session to get cookies
-        print("Initializing session...")
-        xsrf_token = await init_session(session)
+    try:
+        async with aiohttp.ClientSession(
+            connector=connector,
+            timeout=timeout,
+            cookie_jar=cookie_jar
+        ) as session:
+            # Initialize session
+            print("\nInitializing session...")
+            xsrf_token = await init_session(session)
 
-        # First, fetch page 1 to get total count
-        datasets, has_more, total_results = await fetch_page(session, 1, semaphore, xsrf_token)
-        all_datasets.extend(datasets)
+            if not xsrf_token:
+                print("Warning: No XSRF token found, requests may fail")
 
-        if not datasets:
-            print("Failed to fetch first page. Check if the API requires authentication.")
-            return all_datasets
+            # Scrape using each sort order
+            for sort_by in SORT_OPTIONS:
+                if sort_by in completed_sorts:
+                    print(f"\nSkipping already completed: {sort_by}")
+                    continue
 
-        if not has_more:
-            return all_datasets
+                try:
+                    new_datasets = await scrape_with_sort(
+                        session, semaphore, xsrf_token, sort_by, seen_ids, max_pages
+                    )
+                    total_new += len(new_datasets)
 
-        # Calculate total pages (20 items per page)
-        items_per_page = 20
-        total_pages = (total_results + items_per_page - 1) // items_per_page
+                    # Mark as completed and save progress
+                    completed_sorts.add(sort_by)
+                    progress["completed_sorts"] = list(completed_sorts)
+                    progress["seen_ids"] = list(seen_ids)
+                    progress["total_scraped"] = len(seen_ids)
+                    save_progress(progress)
 
-        if max_pages:
-            total_pages = min(total_pages, max_pages)
+                    print(f"Completed {sort_by}: {len(new_datasets)} new datasets")
 
-        print(f"\nTotal datasets: {total_results}")
-        print(f"Total pages to fetch: {total_pages}")
-        print("-" * 50)
+                except asyncio.CancelledError:
+                    print(f"\nCancelled during {sort_by}")
+                    save_progress(progress)
+                    raise
+                except Exception as e:
+                    print(f"Error in {sort_by}: {e}")
+                    # Continue with next sort option
 
-        # Fetch remaining pages in batches
-        page = 2
-        while page <= total_pages:
-            batch_size = min(max_concurrent, total_pages - page + 1)
-            tasks = [
-                fetch_page(session, p, semaphore, xsrf_token)
-                for p in range(page, page + batch_size)
-            ]
+    except Exception as e:
+        print(f"\nSession error: {e}")
+        save_progress(progress)
 
-            results = await asyncio.gather(*tasks)
-
-            for datasets, _, _ in results:
-                all_datasets.extend(datasets)
-
-            page += batch_size
-
-            # Progress update
-            progress = len(all_datasets) / total_results * 100
-            print(f"Progress: {len(all_datasets)}/{total_results} ({progress:.1f}%)")
-
-            # Small delay between batches
-            await asyncio.sleep(0.3)
-
-    return all_datasets
-
-
-def save_to_csv(datasets: list[dict], filename: str) -> None:
-    """Save datasets to CSV file."""
-    if not datasets:
-        print("No datasets to save")
-        return
-
-    with open(filename, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_COLUMNS)
-        writer.writeheader()
-        writer.writerows(datasets)
-
-    print(f"\nSaved {len(datasets)} datasets to {filename}")
+    return total_new
 
 
 async def main():
     print("=" * 60)
-    print("Kaggle Dataset Scraper")
+    print("Kaggle Dataset Scraper (Crash-Proof)")
     print("=" * 60)
     print(f"Started at: {datetime.now()}")
+    print(f"Output file: {OUTPUT_FILE}")
+    print(f"Progress file: {PROGRESS_FILE}")
     print()
 
-    # Set max_pages=None to scrape ALL pages, or set a limit for testing
-    # With 611,907 datasets at 20 per page = ~30,596 pages
-    datasets = await scrape_all_datasets(
-        max_concurrent=10,
-        max_pages=None,  # Set to None to scrape ALL pages (~30,600 pages)
-    )
+    try:
+        total_new = await scrape_all_datasets(
+            max_concurrent=10,
+            max_pages=None,
+        )
 
-    # Remove duplicates based on dataset_id
-    seen_ids = set()
-    unique_datasets = []
-    for ds in datasets:
-        ds_id = ds.get("dataset_id")
-        if ds_id and ds_id not in seen_ids:
-            seen_ids.add(ds_id)
-            unique_datasets.append(ds)
+        # Count total in CSV
+        total_in_csv = 0
+        if Path(OUTPUT_FILE).exists():
+            with open(OUTPUT_FILE, "r", encoding="utf-8") as f:
+                total_in_csv = sum(1 for _ in f) - 1  # Subtract header
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"kaggle_datasets_{timestamp}.csv"
-    save_to_csv(unique_datasets, filename)
+        print(f"\n{'='*60}")
+        print(f"SCRAPING COMPLETE")
+        print(f"{'='*60}")
+        print(f"Finished at: {datetime.now()}")
+        print(f"New datasets this run: {total_new}")
+        print(f"Total datasets in CSV: {total_in_csv}")
+        print(f"Output file: {OUTPUT_FILE}")
 
-    print(f"\nFinished at: {datetime.now()}")
-    print(f"Total unique datasets scraped: {len(unique_datasets)}")
+        # Clean up progress file on successful completion
+        progress = load_progress()
+        if len(progress.get("completed_sorts", [])) == len(SORT_OPTIONS):
+            print("\nAll sort options completed. Cleaning up progress file...")
+            if Path(PROGRESS_FILE).exists():
+                os.remove(PROGRESS_FILE)
+
+    except KeyboardInterrupt:
+        print("\n\nInterrupted by user. Progress saved.")
+    except Exception as e:
+        print(f"\n\nFatal error: {e}")
+        print("Progress saved. Re-run to resume.")
 
 
 if __name__ == "__main__":
-    # Fix for Windows asyncio event loop cleanup warning
     import sys
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
