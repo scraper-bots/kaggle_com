@@ -47,9 +47,36 @@ SORT_OPTIONS = [
     "DATASET_SORT_BY_HOTTEST",
     "DATASET_SORT_BY_VOTES",
     "DATASET_SORT_BY_UPDATED",
-    "DATASET_SORT_BY_ACTIVE",
     "DATASET_SORT_BY_PUBLISHED",
-    "DATASET_SORT_BY_USABILITY",
+]
+
+# Major category IDs from Kaggle (each can yield ~10K datasets)
+CATEGORY_IDS = [
+    None,  # No category filter (general scrape)
+    2200,  # arts and entertainment
+    2303,  # movies and tv shows
+    2304,  # music
+    3007,  # global/countries
+    11102, # business
+    11105, # education
+    11108, # finance
+    11111, # health
+    12101, # artificial intelligence
+    12107, # computer science
+    13201, # exploratory data analysis
+    13204, # nlp
+    13208, # data visualization
+    13215, # data analytics
+    13302, # classification
+    13310, # deep learning
+    14101, # tabular
+    14104, # text
+    14203, # regression
+    16072, # audio
+    16281, # retail and shopping
+    16340, # e-commerce
+    16371, # investing
+    16639, # python
 ]
 
 # CSV column headers - all fields from the API response
@@ -224,24 +251,26 @@ async def init_session(session: aiohttp.ClientSession) -> str | None:
     return None
 
 
-async def scrape_with_sort(
+async def scrape_with_params(
     session: aiohttp.ClientSession,
     semaphore: asyncio.Semaphore,
     xsrf_token: str | None,
     sort_by: str,
+    category_id: int | None,
     seen_ids: set,
     max_pages: int | None = None,
     save_interval: int = 50,
 ) -> list[dict]:
-    """Scrape datasets using a specific sort order with crash protection."""
+    """Scrape datasets using specific sort order and category with crash protection."""
     all_new_datasets = []
     batch_datasets = []
     page = 1
     consecutive_errors = 0
     max_consecutive_errors = 10
 
+    cat_name = f"cat:{category_id}" if category_id else "all"
     print(f"\n{'='*50}")
-    print(f"Scraping with sort: {sort_by}")
+    print(f"Scraping: {sort_by} | {cat_name}")
     print(f"{'='*50}")
 
     while True:
@@ -253,6 +282,8 @@ async def scrape_with_sort(
             break
 
         payload = {**BASE_PAYLOAD, "page": page, "sortBy": sort_by}
+        if category_id:
+            payload["categoryIds"] = [category_id]
         headers = {**HEADERS}
         if xsrf_token:
             headers["X-XSRF-TOKEN"] = xsrf_token
@@ -356,8 +387,9 @@ async def scrape_all_datasets(
 
     total_new = 0
 
+    total_combinations = len(CATEGORY_IDS) * len(SORT_OPTIONS)
     print(f"\nResuming from progress:")
-    print(f"  Completed sorts: {len(completed_sorts)}")
+    print(f"  Completed combinations: {len(completed_sorts)}/{total_combinations}")
     print(f"  Existing datasets: {len(existing_datasets)}")
     print(f"  Seen IDs: {len(seen_ids)}")
 
@@ -384,34 +416,41 @@ async def scrape_all_datasets(
             if not xsrf_token:
                 print("Warning: No XSRF token found, requests may fail")
 
-            # Scrape using each sort order
-            for sort_by in SORT_OPTIONS:
-                if sort_by in completed_sorts:
-                    print(f"\nSkipping already completed: {sort_by}")
-                    continue
+            # Scrape using each category and sort combination
+            total_combinations = len(CATEGORY_IDS) * len(SORT_OPTIONS)
+            current = 0
 
-                try:
-                    new_datasets = await scrape_with_sort(
-                        session, semaphore, xsrf_token, sort_by, seen_ids, max_pages
-                    )
-                    total_new += len(new_datasets)
+            for category_id in CATEGORY_IDS:
+                for sort_by in SORT_OPTIONS:
+                    current += 1
+                    combo_key = f"{sort_by}|{category_id}"
 
-                    # Mark as completed and save progress
-                    completed_sorts.add(sort_by)
-                    progress["completed_sorts"] = list(completed_sorts)
-                    progress["seen_ids"] = [str(id) for id in seen_ids]
-                    progress["total_scraped"] = len(seen_ids)
-                    save_progress(progress)
+                    if combo_key in completed_sorts:
+                        print(f"\nSkipping already completed: {combo_key}")
+                        continue
 
-                    print(f"Completed {sort_by}: {len(new_datasets)} new datasets")
+                    try:
+                        new_datasets = await scrape_with_params(
+                            session, semaphore, xsrf_token, sort_by, category_id, seen_ids, max_pages
+                        )
+                        total_new += len(new_datasets)
 
-                except asyncio.CancelledError:
-                    print(f"\nCancelled during {sort_by}")
-                    save_progress(progress)
-                    raise
-                except Exception as e:
-                    print(f"Error in {sort_by}: {e}")
-                    # Continue with next sort option
+                        # Mark as completed and save progress
+                        completed_sorts.add(combo_key)
+                        progress["completed_sorts"] = list(completed_sorts)
+                        progress["seen_ids"] = [str(id) for id in seen_ids]
+                        progress["total_scraped"] = len(seen_ids)
+                        save_progress(progress)
+
+                        print(f"[{current}/{total_combinations}] Completed: {len(new_datasets)} new (total: {len(seen_ids)})")
+
+                    except asyncio.CancelledError:
+                        print(f"\nCancelled during {combo_key}")
+                        save_progress(progress)
+                        raise
+                    except Exception as e:
+                        print(f"Error in {combo_key}: {e}")
+                        # Continue with next combination
 
     except Exception as e:
         print(f"\nSession error: {e}")
