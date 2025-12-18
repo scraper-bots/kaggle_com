@@ -169,9 +169,9 @@ def load_existing_csv() -> tuple[list[dict], set]:
                 reader = csv.DictReader(f)
                 for row in reader:
                     datasets.append(row)
-                    ds_id = row.get("dataset_id")
+                    ds_id = row.get("dataset_id", "")
                     if ds_id:
-                        seen_ids.add(int(ds_id) if ds_id.isdigit() else ds_id)
+                        seen_ids.add(str(ds_id))
             print(f"Loaded {len(datasets)} existing datasets from {OUTPUT_FILE}")
         except Exception as e:
             print(f"Error loading existing CSV: {e}")
@@ -260,10 +260,6 @@ async def scrape_with_sort(
         try:
             async with semaphore:
                 async with session.post(API_URL, json=payload, headers=headers) as response:
-                    # Debug: print status for first few pages
-                    if page <= 5:
-                        print(f"  DEBUG Page {page}: status={response.status}")
-
                     if response.status == 404:
                         consecutive_errors += 1
                         if consecutive_errors >= 3:
@@ -296,7 +292,7 @@ async def scrape_with_sort(
                     for item in items:
                         try:
                             extracted = extract_dataset_info(item)
-                            ds_id = extracted.get("dataset_id")
+                            ds_id = str(extracted.get("dataset_id", ""))
                             if ds_id and ds_id not in seen_ids:
                                 seen_ids.add(ds_id)
                                 batch_datasets.append(extracted)
@@ -355,7 +351,8 @@ async def scrape_all_datasets(
 
     # Load existing data
     existing_datasets, seen_ids = load_existing_csv()
-    seen_ids.update(progress.get("seen_ids", []))
+    # Merge saved IDs (convert to strings for consistency)
+    seen_ids.update(str(id) for id in progress.get("seen_ids", []))
 
     total_new = 0
 
@@ -402,7 +399,7 @@ async def scrape_all_datasets(
                     # Mark as completed and save progress
                     completed_sorts.add(sort_by)
                     progress["completed_sorts"] = list(completed_sorts)
-                    progress["seen_ids"] = list(seen_ids)
+                    progress["seen_ids"] = [str(id) for id in seen_ids]
                     progress["total_scraped"] = len(seen_ids)
                     save_progress(progress)
 
