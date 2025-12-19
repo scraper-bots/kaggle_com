@@ -624,7 +624,9 @@ Based on this analysis, here are actionable tips:
 
 ---
 
-## Data Collection
+## Data Source
+
+📊 **Dataset:** [Kaggle Datasets Metadata](https://www.kaggle.com/datasets/ismetsemedov/kaggle-datasets)
 
 This analysis is based on data collected from Kaggle's public dataset API, covering {stats['total_datasets']:,} unique datasets across all categories and time periods.
 

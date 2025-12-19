@@ -1,18 +1,18 @@
 # Kaggle Dataset Ecosystem Analysis
 
-> Comprehensive analysis of **112,691** Kaggle datasets to understand engagement patterns and ecosystem dynamics.
+> Comprehensive analysis of **122,629** Kaggle datasets to understand engagement patterns and ecosystem dynamics.
 
 ## Key Metrics
 
 | Metric | Value |
 |--------|-------|
-| Total Datasets Analyzed | **112,691** |
-| Total Views | **823,055,722** |
-| Total Downloads | **132,154,427** |
-| Total Votes | **1,988,437** |
+| Total Datasets Analyzed | **122,629** |
+| Total Views | **828,422,590** |
+| Total Downloads | **132,775,416** |
+| Total Votes | **2,001,496** |
 | Average Usability Score | **0.62** |
-| Top Category | **business** (15,186 datasets) |
-| Most Active Tier | **CONTRIBUTOR** (78,584 datasets) |
+| Top Category | **classification** (23,844 datasets) |
+| Most Active Tier | **CONTRIBUTOR** (87,997 datasets) |
 
 ---
 
@@ -113,8 +113,10 @@ Based on this analysis, here are actionable tips:
 
 ---
 
-## Data Collection
+## Data Source
 
-This analysis is based on data collected from Kaggle's public dataset API, covering 112,691 unique datasets across all categories and time periods.
+📊 **Dataset:** [Kaggle Datasets Metadata](https://www.kaggle.com/datasets/ismetsemedov/kaggle-datasets)
 
-**Last Updated:** 2025-12-19 08:32
+This analysis is based on data collected from Kaggle's public dataset API, covering 122,629 unique datasets across all categories and time periods.
+
+**Last Updated:** 2025-12-19 12:20
